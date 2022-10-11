@@ -1686,7 +1686,7 @@ int main( int argc, char** argv )
                 const int irow = (counter / stride)*rowStep;
                 const int icol = (counter % stride)*colStep;
                 
-                sycl::ext::oneapi::atomic_ref<uint32_t, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> atomic_data (dev_nb_obj_found2[s]);
+                sycl::atomic_ref<uint32_t, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> atomic_data (dev_nb_obj_found2[s]);
                 double varFact, featVal;
                 
                 if ((irow < nTileRows) && (icol < nTileCols)){
@@ -1765,8 +1765,8 @@ int main( int argc, char** argv )
                 float centerX_tmp, centerY_tmp, radius_tmp; 
                 
                 //change this for a single number 
-                sycl::ext::oneapi::atomic_ref<uint32_t, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> atomic_indx (dev_nb_obj_found[s]);
-                sycl::ext::oneapi::atomic_ref<uint32_t, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> atomic_scl (dev_scale_index_found[0]);
+                sycl::atomic_ref<uint32_t, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> atomic_indx (dev_nb_obj_found[s]);
+                sycl::atomic_ref<uint32_t, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space> atomic_scl (dev_scale_index_found[0]);
 
                 float ss = (float)scaleStep;
 				const float scaleFactor = (float) sycl::powr( ss, (float)s);
