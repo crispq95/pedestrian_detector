@@ -28,7 +28,7 @@
 ############################################################################### 
 
 LIBRARY= -lm -std=c99  
-ACCFLAGS = -acc=gpu -ta=tesla:pinned -Munroll -Minline -Minfo=acc
+ACCFLAGS = -acc=gpu -ta=tesla:managed -fast -Minfo=acc #-Munroll -Minline -Minfo=acc
 
 all: violajones 
 c: violajones
@@ -41,8 +41,7 @@ violajones: violajones.c violajones.h
  
 violajones_acc: violajones_acc.c violajones.h
 	mkdir -p bin
-	/opt/nvidia/hpc_sdk/Linux_x86_64/22.2/compilers/bin/nvc++ -g -L. -o ./bin/violajones_acc violajones_acc.c $(LIBRARY) $(ACCFLAGS) 
-#-fast 
+	/opt/nvidia/hpc_sdk/Linux_x86_64/22.2/compilers/bin/nvc++ -g -fast -L. -o ./bin/violajones_acc violajones_acc.c $(LIBRARY) $(ACCFLAGS) 
 
 violajones_sycl: violajones_sycl.cpp violajones.h
 	mkdir -p bin 
