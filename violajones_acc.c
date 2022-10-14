@@ -520,11 +520,11 @@ void readClassifCascade(char *haarFileName, CvHaarClassifierCascade *cascade, in
 //end function: readClassifCascade *********************************************
 
 /*** Pixel-wise square image ****/
-void imgDotSquare(uint32_t *imgIn, uint32_t *imgOut, int height, int width)
+void imgDotSquare(uint32_t *imgIn, uint32_t *imgOut, int height, int width, int stream)
 {
 	int irow = 0, icol = 0;
 
-	#pragma acc parallel loop collapse(2) independent present(imgOut[0:width*height], imgIn[0:width*height])
+	#pragma acc parallel loop collapse(2) independent present(imgOut[0:width*height], imgIn[0:width*height]) async(stream)
 	for (irow = 0; irow < height; irow++){
 		for (icol = 0; icol < width; icol++){
 			imgOut[irow*width+icol] = imgIn[irow*width+icol] * imgIn[irow*width+icol];
@@ -563,11 +563,11 @@ double aux_test = -1;
 
 /*** Cast int image as double ****/
 // #pragma acc routine 
-void imgCopy(uint32_t *imgIn, float *imgOut, int height, int width)
+void imgCopy(uint32_t *imgIn, float *imgOut, int height, int width, int stream)
 {
 	int irow = 0, icol = 0;
 
-	#pragma acc parallel loop collapse(2) independent present(imgIn[0:width*height], imgOut[0:width*height])
+	#pragma acc parallel loop collapse(2) independent present(imgIn[0:width*height], imgOut[0:width*height]) async(stream)
 	for (irow = 0; irow < height; irow++){
 		for (icol = 0; icol < width; icol++){
 			// aux_test = (double)imgIn[irow*width+icol];
@@ -617,11 +617,11 @@ void computeIntegralImg(uint32_t *imgIn, uint32_t *imgOut, int height, int width
 	}
 }
 
-void computeIntegralImgRowACC(uint32_t *imgIn, uint32_t *imgOut, int width, int height)
+void computeIntegralImgRowACC(uint32_t *imgIn, uint32_t *imgOut, int width, int height, int stream)
 {	
 	int irow, icol;
 
-	#pragma acc parallel loop independent present(imgIn[0:width*height], imgOut[0:width*height])
+	#pragma acc parallel loop independent present(imgIn[0:width*height], imgOut[0:width*height]) async(stream)
 	for (irow = 0 ; irow < height; irow++)
 	{
 		uint32_t row_sum=0;	
@@ -636,11 +636,11 @@ void computeIntegralImgRowACC(uint32_t *imgIn, uint32_t *imgOut, int width, int 
 }
 
 
-void computeIntegralImgColACC(uint32_t *imgOut, int width, int height)
+void computeIntegralImgColACC(uint32_t *imgOut, int width, int height, int stream)
 {
 	int icol = 0, irow;
 
-	#pragma acc parallel loop independent present(imgOut[0:width*height])
+	#pragma acc parallel loop independent present(imgOut[0:width*height]) async(stream)
 	for (icol = 0 ; icol < width; icol++)
 	{
 		uint32_t col_sum=0;
@@ -991,7 +991,7 @@ void writeInFeature(int rowVect[4], int colVect[4], int hVect[4], int wVect[4], 
 
 #pragma acc routine seq 
 // void computeFeature(double *img, double *imgSq, CvHaarFeature *f, double *featVal, int irow, int icol, int height, int width, double scale, float scale_correction_factor, CvHaarFeature *f_scaled, int real_height, int real_width)
-void computeFeature(float *img, float *imgSq, CvHaarFeature *f, float *featVal, int irow, int icol, int height, int width, double scale, float scale_correction_factor, int real_height, int real_width)
+float computeFeature(float *img, float *imgSq, CvHaarFeature *f, float featVal, int irow, int icol, int height, int width, double scale, float scale_correction_factor, int real_height, int real_width)
 {
 	int nRects = 0;
 	int col = 0;
@@ -1010,7 +1010,7 @@ void computeFeature(float *img, float *imgSq, CvHaarFeature *f, float *featVal, 
 	float val = 0.0;
 	float s[N_RECTANGLES_MAX] = {0};
 
-	*featVal = 0.0;
+	// *featVal = 0.0;
 
 	w1 = f->rect[0].weight * scale_correction_factor;
 
@@ -1074,7 +1074,8 @@ void computeFeature(float *img, float *imgSq, CvHaarFeature *f, float *featVal, 
     // test values for each rectangle
 		rowVect[i] = row; colVect[i] = col; hVect[i] = hRect; wVect[i] = wRect;
 	}
-	*featVal = val;
+	return val; 
+	// *featVal = val;
 	// writeInFeature(rowVect,colVect,hVect,wVect,rectWeight,nRects,f_scaled);
 }
 //end function: computeFeature *************************************************
@@ -1382,7 +1383,30 @@ int main( int argc, char** argv )
 
 	TRACE_INFO(("Allocations finished!\n"));
 
+	#pragma acc enter data copyin(cascade)
+	#pragma acc enter data copyin(cascade->stageClassifier[0:N_MAX_STAGES] ) 
+	for(int i =0; i<N_MAX_STAGES; i++){
+		#pragma acc enter data copyin(cascade->stageClassifier[i].classifier[0:N_MAX_CLASSIFIERS])
+		for(int j = 0; j < N_MAX_CLASSIFIERS; j++){
+			#pragma acc enter data copyin(cascade->stageClassifier[i].classifier[j].haarFeature, \ 
+			cascade->stageClassifier[i].classifier[j].haarFeature->rect[0:2], \
+			cascade->stageClassifier[i].classifier[j].left, cascade->stageClassifier[i].classifier[j].right, \
+			cascade->stageClassifier[i].classifier[j].threshold)
+
+			for (int k = 0; k<2; k++){
+				#pragma acc enter data copyin(cascade->stageClassifier[i].classifier[j].haarFeature->rect[k].r, \ 
+				cascade->stageClassifier[i].classifier[j].haarFeature->rect[k].r.x0, cascade->stageClassifier[i].classifier[j].haarFeature->rect[k].r.y0, \
+				cascade->stageClassifier[i].classifier[j].haarFeature->rect[k].r.width, cascade->stageClassifier[i].classifier[j].haarFeature->rect[k].r.height, \
+				 cascade->stageClassifier[i].classifier[j].haarFeature->rect[k].weight)
+			}
+		}
+		#pragma acc enter data copyin(cascade->stageClassifier[i].count)
+		#pragma acc enter data copyin(cascade->stageClassifier[i].threshold)
+	}
+
+
 	int total_scales=0; 
+	int stream = 1;
 
 	for (scaleFactor = 1; scaleFactor <= scaleFactorMax; scaleFactor *= scaleStep)
 		total_scales++;
@@ -1391,13 +1415,44 @@ int main( int argc, char** argv )
 	
 	do // Infinite loop
 	{
+	
+	// #pragma acc enter data create(img[0:width*height], imgSq[0:width*height], imgInt[0:width*height], imgSqInt[0:width*height], \ 
+	// imgInt_f[0:width*height], imgSqInt_f[0:width*height], foundObj_test[0:N_MAX_STAGES], goodcenterX_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	// goodcenterY_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found2[0:N_MAX_STAGES], goodRadius_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found[0:N_MAX_STAGES], \ 
+	// goodcenterX[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	// position[0:width*height]) 
 	for(int image_counter=0; image_counter < argc-2; image_counter++)
 	{
 	// int image_counter=1;
 	// Task 1: Start Frame acquisition.
-	// start = clock(); 
     start= clock(); 
-    nNodes = 0;
+
+	
+	
+    imgName=argv[image_counter+2];
+
+    // load the Image in Memory 
+    load_image_check((uint32_t *)img, (char *)imgName, width, height);
+
+	 // Compute the Interal Image 
+    computeIntegralImgRowACC((uint32_t*)img, (uint32_t*)imgInt, width, height, stream);
+    computeIntegralImgColACC((uint32_t*)imgInt, width, height, stream);
+    // computeIntegralImg((uint32_t *)img, (uint32_t *)imgInt, height, width);
+
+    // Calculate the Image square 
+    imgDotSquare((uint32_t *)img, (uint32_t *)imgSq, height, width, stream);
+    /* Compute the Integral Image square */
+    // computeIntegralImg((uint32_t *)imgSq, (uint32_t *)imgSqInt, height, width);
+    computeIntegralImgRowACC((uint32_t*)imgSq, (uint32_t*)imgSqInt, width, height, stream);
+    computeIntegralImgColACC((uint32_t*)imgSqInt, width, height, stream);
+	#pragma acc wait(stream)
+		
+	if(image_counter%2)
+		stream = 1; 
+	else 
+		stream = 2; 
+
+	nNodes = 0;
     foundObj = 0;
     scale_index_found=0;
     varFact = 0.f;
@@ -1414,36 +1469,24 @@ int main( int argc, char** argv )
     memset(foundObj_test, 0, N_MAX_STAGES*sizeof (uint32_t));
     memset(foundObj_test2, 0, N_MAX_STAGES*sizeof (uint32_t));
 
+	#pragma acc parallel loop
     for(int xx = 0; xx < N_MAX_STAGES; xx++){
         for(int yy = 0; yy < NB_MAX_DETECTION; yy++)
         {
             goodcenterX[xx][yy] = 0;
             goodcenterY[xx][yy] = 0;
             goodRadius[xx][yy] = 0;
+			goodRadius_tmp[xx][yy] = 0;
         }
     }
 
-    imgName=argv[image_counter+2];
-    // load the Image in Memory 
-    load_image_check((uint32_t *)img, (char *)imgName, width, height);
+
     printf("Load Image Done.\n");
     TRACE_INFO(("Load Image Done %s!\n", imgName));
 
-    // Compute the Interal Image 
-    computeIntegralImgRowACC((uint32_t*)img, (uint32_t*)imgInt, width, height);
-    computeIntegralImgColACC((uint32_t*)imgInt, width, height);
-    // computeIntegralImg((uint32_t *)img, (uint32_t *)imgInt, height, width);
-
-    // Calculate the Image square 
-    imgDotSquare((uint32_t *)img, (uint32_t *)imgSq, height, width);
-    /* Compute the Integral Image square */
-    // computeIntegralImg((uint32_t *)imgSq, (uint32_t *)imgSqInt, height, width);
-    computeIntegralImgRowACC((uint32_t*)imgSq, (uint32_t*)imgSqInt, width, height);
-    computeIntegralImgColACC((uint32_t*)imgSqInt, width, height);
-
     // Copy the Image to float array 
-    imgCopy((uint32_t *)imgInt, (float *)imgInt_f, height, width);
-    imgCopy((uint32_t *)imgSqInt, (float *)imgSqInt_f, height, width);
+    imgCopy((uint32_t *)imgInt, (float *)imgInt_f, height, width, stream);
+    imgCopy((uint32_t *)imgSqInt, (float *)imgSqInt_f, height, width, stream);
 
     TRACE_INFO(("Done with integral image\n"));
 
@@ -1455,114 +1498,153 @@ int main( int argc, char** argv )
 	int tmp=0; 
 
 	// Task 2: Start Frame processing.
-
 	int const cascade_size = N_MAX_STAGES + N_MAX_STAGES * N_MAX_CLASSIFIERS + N_MAX_STAGES * N_MAX_CLASSIFIERS;
 	int const index_f_size = N_MAX_STAGES*NB_MAX_DETECTION, gR_size = total_scales*NB_MAX_DETECTION;
 
+	float scaleFactor=1.1; 
+	int tileWidth = (int)floor(detSizeC * scaleFactor + 0.5);
+	int tileHeight = (int)floor(detSizeR * scaleFactor + 0.5);
+	int rowStep = max(2, (int)floor(scaleFactor + 0.5));
+	int colStep = max(2, (int)floor(scaleFactor + 0.5));
 
-	// Launch the Main Loop 
-	#pragma acc parallel loop seq independent firstprivate(detSizeC, detSizeR, height, width) 
-	for (int s = 0; s < total_scales; s++){
-		const float scaleFactor = (float) powf(scaleStep, (float)s);
+	//(TP) according to openCV: added correction by reducing scaled detector window by 2 pixels in each direction
+	// compute number of tiles: difference between the size of the Image and the size of the Detector
+	int nTileRows = height-tileHeight;
+	int nTileCols = width-tileWidth;
+
+	// TRACE_INFO(("Inside scale for and before stage for!\n"));
+	int irowiterations = (int)ceilf((float)nTileRows/rowStep);
+	int icoliterations = (int)ceilf((float)nTileCols/colStep);
 	
-		//TRACE_INFO(("Processing scale %f/%f\n", scaleFactor, scaleFactorMax));
-		const int tileWidth = (int)floor(detSizeC * scaleFactor + 0.5);
-		const int tileHeight = (int)floor(detSizeR * scaleFactor + 0.5);
-		const int rowStep = max(2, (int)floor(scaleFactor + 0.5));
-		const int colStep = max(2, (int)floor(scaleFactor + 0.5));
+	#pragma acc parallel loop collapse(3) independent async(stream) 
+	for (int r = 0; r < irowiterations; r++){
+		for (int c = 0; c < icoliterations; c++){
+			for (int scale = 0; scale < total_scales; scale++)
+			{
+			const float scaleStep = 1.1;
+			const float scaleFactor = (float) powf(scaleStep, (float)scale);
 
-		//(TP) according to openCV: added correction by reducing scaled detector window by 2 pixels in each direction
-		const float scale_correction_factor = (float)1.0/(float)((int)floor((detSizeC-2)*scaleFactor)*(int)floor((detSizeR-2)*scaleFactor)); 
+			const int tileWidth = (int)floor(detSizeC * scaleFactor + 0.5);
+			const int tileHeight = (int)floor(detSizeR * scaleFactor + 0.5);
+			const int rowStep = max(2, (int)floor(scaleFactor + 0.5));
+			const int colStep = max(2, (int)floor(scaleFactor + 0.5));
 
-		// compute number of tiles: difference between the size of the Image and the size of the Detector 
-		const int nTileRows = height-tileHeight;
-		const int nTileCols = width-tileWidth;
+			//(TP) according to openCV: added correction by reducing scaled detector window by 2 pixels in each direction
+			const float scale_correction_factor = (float)1.0/(float)((int)floor((detSizeC-2)*scaleFactor)*(int)floor((detSizeR-2)*scaleFactor)); 
 
-        float varFact, featVal; 
-		// Operation used for every Stage of the Classifier 
-		#pragma acc loop collapse(2) independent  private(varFact, featVal) firstprivate(nTileRows, nTileCols, rowStep, colStep)
-		for (int irow = 0; irow < nTileRows; irow+=rowStep){
-			for (int icol = 0; icol < nTileCols; icol+=colStep){
-				int goodPoints_value = 255;
-				/* Operation used for every Stage of the Classifier */
-				if (goodPoints_value)
+			// compute number of tiles: difference between the size of the Image and the size of the Detector 
+			const int nTileRows = height-tileHeight;
+			const int nTileCols = width-tileWidth;
+			
+			const int stride = (nTileCols + colStep -1 )/colStep;
+
+			const int irow = ((r*(nTileRows/rowStep)+c) / stride)*rowStep; 
+			const int icol = ((r*(nTileRows/rowStep)+c) % stride)*colStep;
+			TRACE_INFO(("Inside scale for and before stage for!\n"));
+
+			// Operation used for every Stage of the Classifier 
+			if ((irow < nTileRows) && (icol < nTileCols))
+			{
+			int gp = 255; 
+
+			/* Operation used for every Stage of the Classifier */
+			float varFact, featVal; 
+
+			varFact=computeVariance((float *)imgInt_f, (float *)imgSqInt_f, irow, icol, tileHeight, tileWidth, real_height, real_width);
+
+			if (varFact < 10e-15)
+			{
+				// this should not occur (possible overflow BUG)
+				varFact = 1.0; 
+				gp=0; 
+				continue;
+			}
+			else
+			{
+				// Get the standard deviation 
+				varFact = sqrt(varFact);
+			}
+			
+			#pragma acc loop seq 
+			for (int iStage = 0; iStage < nStages; iStage++)
+			{
+				int nNodes = cascade->stageClassifier[iStage].count;
+				int foundObj = 0;
+				
+				// if (goodPoints[irow*real_width+icol])
+				if (gp)
 				{
-					varFact=computeVariance((float *)imgInt_f, (float *)imgSqInt_f, irow, icol, tileHeight, tileWidth, real_height, real_width);
-
-					if (varFact < 10e-15)
+					float sumClassif = 0.0;
+					
+					#pragma acc loop seq
+					for (int iNode = 0; iNode < nNodes; iNode++)
 					{
-						// this should not occur (possible overflow BUG)
-						varFact = 1.0; 
-						goodPoints_value = 0; 
-						continue;
+						float fv = computeFeature((float *)imgInt_f, (float *)imgSqInt_f, cascade->stageClassifier[iStage].classifier[iNode].haarFeature,
+									featVal, irow, icol, tileHeight, tileWidth, scaleFactor, scale_correction_factor, real_height, real_width);
+						// Get the thresholds for every Node of the stage 
+						float thresh = cascade->stageClassifier[iStage].classifier[iNode].threshold;
+						float a = cascade->stageClassifier[iStage].classifier[iNode].left;
+						float b = cascade->stageClassifier[iStage].classifier[iNode].right;
+						sumClassif += (fv < (float)(thresh*varFact) ? a : b);
 					}
+
+					// Update goodPoints according to detection threshold 
+					if (sumClassif < cascade->stageClassifier[iStage].threshold)
+					{
+						gp=0; 
+					}	  
 					else
-					{
-						// Get the standard deviation 
-						varFact = sqrt(varFact);
-					}
-				}
-
-				#pragma acc loop seq independent
-				for (int iStage = 0; iStage < nStages; iStage++)
-				{
-					int nNodes = cascade->stageClassifier[iStage].count;
-					if (goodPoints_value)
 					{	
-						float sumClassif = 0.0;
+						if (iStage == nStages - 1)
+						{ 
+							foundObj++;
+							int actu = 0; 
 
-						#pragma acc loop seq 
-						for (int iNode = 0; iNode < nNodes; iNode++)
-						{
-							computeFeature((float *)imgInt_f, (float *)imgSqInt_f, cascade->stageClassifier[iStage].classifier[iNode].haarFeature,
-											&featVal, irow, icol, tileHeight, tileWidth, scaleFactor, scale_correction_factor, real_height, real_width);
-							// Get the thresholds for every Node of the stage 
-							float thresh = cascade->stageClassifier[iStage].classifier[iNode].threshold;
-							float a = cascade->stageClassifier[iStage].classifier[iNode].left;
-							float b = cascade->stageClassifier[iStage].classifier[iNode].right;
-							sumClassif += (float)(featVal < (thresh*varFact) ? a : b);
-						}
-						// Update goodPoints according to detection threshold 
-						if (sumClassif < cascade->stageClassifier[iStage].threshold){
-							goodPoints_value = 0;
-						}else{	
-							if (iStage == nStages - 1 )
-							{ 
-								int actu = 0; 
-
-								float centerX=(((tileWidth-1)*0.5+icol));
-								float centerY=(((tileHeight-1)*0.5+irow));
-								float radius = sqrt(pow(tileHeight-1, 2)+pow(tileWidth-1, 2))/2;
-
-								#pragma acc atomic capture 
-								{
-									actu=foundObj_test[s];	//solo funciona si esta init + en firstprivate / private ?
-									foundObj_test[s]++;
-								}
-
-								goodcenterX_tmp[s*NB_MAX_DETECTION+actu]=centerX;
-								goodcenterY_tmp[s*NB_MAX_DETECTION+actu]=centerY;
-								goodRadius_tmp[s][actu]=radius;
-
-								#pragma acc atomic update 
-								nb_obj_found2[s]+=1; 
+							float centerX=(((tileWidth-1)*0.5+icol));
+							float centerY=(((tileHeight-1)*0.5+irow));
+							uint32_t radius_tmp=sqrt(pow((float)tileHeight-1, 2)+pow((float)tileWidth-1, 2))/2;
+			
+							#pragma acc atomic capture 
+							{
+								actu=foundObj_test[scale];	//solo funciona si esta init + en firstprivate / private ?
+								foundObj_test[scale]++;
 							}
-						}	  
-					}
-				} // FOR STAGES
-			}	// FOR COL
-		}	// FOR ROW 
-	} // FOR TOTAL SCALES 
+
+							// printf("x: %f - y:%f\n", centerX, centerY); 
+							goodcenterX_tmp[scale*NB_MAX_DETECTION+actu]=centerX;
+							goodcenterY_tmp[scale*NB_MAX_DETECTION+actu]=centerY;
+							goodRadius_tmp[scale][actu]=radius;
+
+							#pragma acc atomic update 
+							nb_obj_found2[scale]+=1; 
+						
+						}
+					}	  
+				}
+			}
+		}
+	}
+
+	}
+		TRACE_INFO(("Finished founds\n"));	
+		TRACE_INFO(("Finished founds processing\n"));
+	}
 
 
-	#pragma acc parallel loop reduction(max:scale_index_found) 
+	// present(goodcenterX[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY[0:NB_MAX_DETECTION*N_MAX_STAGES], goodRadius[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
+	//  goodcenterX_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], goodRadius_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
+	//  nb_obj_found2[0:N_MAX_STAGES], nb_obj_found[0:N_MAX_STAGES])
+
+	#pragma acc parallel loop async(stream)  
 	for (int s = 0; s < total_scales; s++){
-		
 		const float scaleFactor = (float) powf(scaleStep, (float)s);
 		const int tileWidth = (int)floor(detSizeC * scaleFactor + 0.5);
 		const int tileHeight = (int)floor(detSizeR * scaleFactor + 0.5);
 
-		#pragma acc loop seq 
+		float centerX_tmp, centerY_tmp;
+		uint32_t radius_tmp;
+
+		#pragma acc loop seq private(centerX_tmp, centerY_tmp, radius_tmp)
 		for (int j=0; j < nb_obj_found2[s]; j++){
 
 			float centerX = goodcenterX_tmp[s*NB_MAX_DETECTION+j];
@@ -1571,6 +1653,7 @@ int main( int argc, char** argv )
 			int threshold_X=(int)((tileHeight-1)/(2*scaleFactor));
 			int threshold_Y=(int)((tileWidth-1)/(2*scaleFactor));
 
+			// if(current_image_counter == 0)
 			// printf("_________Evaluando[%d][%d] : centerX : %f vs centerX_tmp : %f\n", s,j, centerX, centerX_tmp); 
 
 			if(centerX > (centerX_tmp+threshold_X) || centerX < (centerX_tmp-threshold_X) || (centerY > centerY_tmp+threshold_Y) || centerY < (centerY_tmp-threshold_Y))
@@ -1586,69 +1669,59 @@ int main( int argc, char** argv )
 					nb_obj_found[s]+=1;	
 				}
 
-				// printf("Store values[%d] ::  %f %f at %d %d\n\n", s, centerX_tmp, centerY_tmp, s, priv_indx );
-				goodcenterX[s][priv_indx]=centerX_tmp;
-				goodcenterY[s][priv_indx]=centerY_tmp;
-				goodRadius[s][priv_indx]=radius_tmp;
+				// printf("[%d] Store values[%d] ::  %f %f at %d %d\n\n", image_counter, s, centerX_tmp, centerY_tmp, s, priv_indx );
+				goodcenterX[s][priv_indx]=(uint32_t)centerX_tmp;
+				goodcenterY[s][priv_indx]=(uint32_t)centerY_tmp;
+				goodRadius[s][priv_indx]=(uint32_t)radius_tmp;
+			}
+		}
+	}
+	
+	// present(goodcenterX[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
+		//  goodcenterY[0:NB_MAX_DETECTION*N_MAX_STAGES], position[0:width*height], nb_obj_found[0:N_MAX_STAGES]) \ 
+		   //copy(result2[0:real_height][0:real_width]) 
+	
+	#pragma acc parallel async(stream) firstprivate(real_width, real_height)
+		{
+		int cnt_scale = 0, max_scale = 0, count=0, max_det = 0;
 
-				// nb_obj_found2[s]++;
-
-				#pragma acc atomic write 
-				foundObj_test2[s]=s+1;
-
+		#pragma acc loop seq
+		for(int i=0 ; i < N_MAX_STAGES; i++)
+		{
+			if(nb_obj_found[i] > 0){
+				cnt_scale++;
+				max_det = max(max_det, nb_obj_found[i]);
+				max_scale = max(max_scale, i);	
 			}
 		}
 
-		scale_index_found = max(scale_index_found, foundObj_test2[s]);
-	}
-	scale_index_found++; 
-
-	// Task 2: End Frame processing.
-	// Task 3: Start Frame post-processing.
-
-		// Multi-scale fusion and detection display (note: only a simple fusion scheme implemented
-		int cnt_scale = 0, max_scale=0; 
-		
-		// Multi-scale fusion and detection display (note: only a simple fusion scheme implemented
-		#pragma acc parallel loop reduction(+:cnt_scale) reduction(max: max_scale) present(nb_obj_found2[0:total_scales]) 
-		for(i=0; i<scale_index_found; i++)
-		{
-			max_scale = max(0, nb_obj_found2[i]);
-			if(nb_obj_found2[i])
-				cnt_scale++; 
-		}
-		nb_obj_found2[scale_index_found] = max(max_scale, nb_obj_found2[scale_index_found-1]);
-
-		
-		// Keep the position of each circle from the bigger to the smaller 
-		#pragma acc parallel private(offset_X, offset_Y) copy(result2[0:real_height][0:real_width]) create(position[0:NB_MAX_POINTS*NB_MAX_POINTS]) 
-		{
 		#pragma acc loop seq 
-		for(i=scale_index_found; i>=0; i--)
-		{
+		for(int i=max_scale; i>=0; i--){
 			#pragma acc loop seq 
-			for(j=0; j<nb_obj_found2[scale_index_found]; j++)
+			for(int j=0; j<max_det; j++)
 			{
 				// Normally if (goodcenterX=0 so goodcenterY=0) or (goodcenterY=0 so goodcenterX=0) 
 				if(goodcenterX[i][j] !=0 || goodcenterY[i][j] !=0)
 				{
+					// printf("INSIDE : %d \n", current_goodcenterX[i*NB_MAX_DETECTION+j]); 
 					position[count]=goodcenterX[i][j];
 					position[count+1]=goodcenterY[i][j];
 					position[count+2]=goodRadius[i][j];
 					count=count+3;
 				}
 			}
+
 		}
 		
 		// Create the offset for X and Y 
-		offset_X=(int)(real_width/(float)(cnt_scale*1.2));
-		offset_Y=(int)(real_height/(float)(cnt_scale*1.2));
+		int offset_X=(int)(real_width/(float)(cnt_scale*1.2));
+		int offset_Y=(int)(real_height/(float)(cnt_scale*1.2));
 
 		// Delete detections which are too close 
-		#pragma acc loop independent
-		for(i=0; i<NB_MAX_POINTS; i+=3){
-			#pragma acc loop independent
-			for(j=3; j<NB_MAX_POINTS-i; j+=3){
+		#pragma acc loop seq
+		for(int i=0; i<NB_MAX_POINTS; i+=3){
+			#pragma acc loop seq
+			for(int j=3; j<NB_MAX_POINTS-i; j+=3){
 				
 				if(position[i] != 0 && position[i+j] != 0 && position[i+1] != 0 && position[i+j+1] != 0)
 				{
@@ -1662,24 +1735,23 @@ int main( int argc, char** argv )
 			}
 		}	
 
-
+		
 		int finalNb = 0;
 		
-		#pragma acc loop reduction(+:finalNb)
-		for(i=0; i<NB_MAX_POINTS; i+=3)
+		#pragma acc loop seq
+		for(int i=0; i<NB_MAX_POINTS; i+=3)
 		{
 			if (position[i]!=0) 
 			{
 				finalNb++;
 				#if PRINT_OUTPUT
-					printf("x:%d, y:%d, scale:%d, ValidOutput:%d\n", (int)position[i], (int)position[i+1], (int)(position[i+2]/2), finalNb);
+					printf("[%d] x:%d, y:%d, scale:%d, ValidOutput:%d\n", image_counter, (int)position[i], (int)position[i+1], (int)(position[i+2]/2), finalNb);
 					
 				#endif
 			}
 		}
-
-		}
-
+		}	//END PARALLEL REGION
+	
 
 		#if WRITE_IMG
         // Write the final result of the detection application 
@@ -1711,7 +1783,7 @@ int main( int argc, char** argv )
             imgWrite((uint32_t *)result2[scale_index_found], result_name, height, width);
 		#endif
 
-		TRACE_INFO(("END\n"));
+		// TRACE_INFO(("END\n"));
 
 
 		
@@ -1728,6 +1800,14 @@ int main( int argc, char** argv )
 	frame_end = clock();
 	const float frame_time = (double)((frame_end-frame_start))/CLOCKS_PER_SEC * 1000;
 	printf("\nExecution time = %f for %d FRAMES ms.\n", frame_time, (argc-2));
+
+
+	// #pragma acc exit data delete(img[0:width*height], imgSq[0:width*height], imgInt[0:width*height], imgSqInt[0:width*height], \ 
+	// imgInt_f[0:width*height], imgSqInt_f[0:width*height], foundObj_test[0:N_MAX_STAGES], \ 
+	// goodcenterX_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION],  \ 
+	// nb_obj_found2[0:N_MAX_STAGES], goodRadius_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found[0:N_MAX_STAGES], \ 
+	// goodcenterX[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	// position[0:width*height]) 
 
 	// FREE ALL the allocations 
 	releaseCascade(cascade);
