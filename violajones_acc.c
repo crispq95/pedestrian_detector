@@ -1335,7 +1335,7 @@ int main( int argc, char** argv )
 
 	// Allocate the Cascade Memory 
 	cascade = allocCascade_continuous();
-	cascade_scaled = allocCascade_continuous();
+	// cascade_scaled = allocCascade_continuous();
 	feature_scaled = malloc(sizeof(CvHaarFeature));
 
 	// Get the Classifier informations 
@@ -1451,11 +1451,15 @@ int main( int argc, char** argv )
 	do // Infinite loop
 	{
 	
-	// #pragma acc enter data create(img[0:width*height], imgSq[0:width*height], imgInt[0:width*height], imgSqInt[0:width*height], \ 
-	// imgInt_f[0:width*height], imgSqInt_f[0:width*height], foundObj_test[0:N_MAX_STAGES], goodcenterX_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
-	// goodcenterY_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found2[0:N_MAX_STAGES], goodRadius_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found[0:N_MAX_STAGES], \ 
-	// goodcenterX[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
-	// position[0:width*height]) 
+	#pragma acc enter data create(img1[0:width*height], img2[0:width*height], imgSq1[0:width*height], imgSq2[0:width*height], \ 
+	imgInt1[0:width*height], imgInt2[0:width*height], imgSqInt1[0:width*height], imgSqInt2[0:width*height], goodcenterY_tmp1[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	imgInt_f1[0:width*height], imgInt_f2[0:width*height], imgSqInt_f1[0:width*height], imgSqInt_f2[0:width*height], \ 
+	foundObj_test_1[0:N_MAX_STAGES], foundObj_test_2[0:N_MAX_STAGES], foundObj_test2_1[0:N_MAX_STAGES], foundObj_test2_2[0:N_MAX_STAGES], goodcenterX_tmp1[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	goodcenterX_tmp2[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY_tmp2[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found2_1[0:N_MAX_STAGES], \ 
+	nb_obj_found2_2[0:N_MAX_STAGES], goodRadius_tmp1[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius_tmp2[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	nb_obj_found_1[0:N_MAX_STAGES],  nb_obj_found_2[0:N_MAX_STAGES], goodcenterX1[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterX2[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	goodcenterY1[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY2[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius1[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	goodRadius2[0:N_MAX_STAGES*NB_MAX_DETECTION], position1[0:width*height], position2[0:width*height]) 
 	for(int image_counter=0; image_counter < (argc-2); image_counter++) //argc-2
 	{
 
@@ -1523,17 +1527,14 @@ int main( int argc, char** argv )
 		result2=result2_2;
 	}
 
-
-	// int image_counter=1;
 	// Task 1: Start Frame acquisition.
     start= clock(); 
     imgName=argv[image_counter+2];
 	// load the Image in Memory 
     load_image_check((uint32_t *)img, (char *)imgName, width, height);
-	#pragma acc wait(stream)
 	
 	memset(goodcenterX_tmp, 0, NB_MAX_DETECTION*NB_MAX_DETECTION*sizeof(float));
-    memset(goodcenterX_tmp, 0, NB_MAX_DETECTION*NB_MAX_DETECTION*sizeof(float));
+    memset(goodcenterY_tmp, 0, NB_MAX_DETECTION*NB_MAX_DETECTION*sizeof(float));
 	memset(goodRadius_tmp, 0, NB_MAX_DETECTION*NB_MAX_DETECTION*sizeof(uint32_t));
 	
     memset(nb_obj_found2, 0, N_MAX_STAGES*sizeof (uint32_t));
@@ -1547,9 +1548,12 @@ int main( int argc, char** argv )
     memset(foundObj_test2, 0, N_MAX_STAGES*sizeof (uint32_t));
 
 	memset(position, 0, width*height*sizeof (uint32_t));
+	#pragma acc wait(stream)
 
-    
-
+	#pragma acc update device(img[0:width*height]) async(stream)
+	#pragma acc update device(foundObj_test[0:N_MAX_STAGES], goodcenterX_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found2[0:N_MAX_STAGES]) async(stream)
+	#pragma acc update device(goodcenterX[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found[0:N_MAX_STAGES]) async(stream)
+	#pragma acc update device(position[0:width*height]) async(stream)
 	 // Compute the Interal Image 
     computeIntegralImgRowACC((uint32_t*)img, (uint32_t*)imgInt, width, height, stream);
     computeIntegralImgColACC((uint32_t*)imgInt, width, height, stream);
@@ -1558,14 +1562,12 @@ int main( int argc, char** argv )
     imgDotSquare((uint32_t *)img, (uint32_t *)imgSq, height, width, stream);
 
     /* Compute the Integral Image square */
-    // computeIntegralImg((uint32_t *)imgSq, (uint32_t *)imgSqInt, height, width);
     computeIntegralImgRowACC((uint32_t*)imgSq, (uint32_t*)imgSqInt, width, height, stream);
     computeIntegralImgColACC((uint32_t*)imgSqInt, width, height, stream);
 
-    printf("Load Image Done.\n");
     TRACE_INFO(("Load Image Done %s!\n", imgName));
     
-	// Copy the Image to float array 
+	/* Copy the Image to float array */
     imgCopy((uint32_t *)imgInt, (float *)imgInt_f, height, width, stream);
     imgCopy((uint32_t *)imgSqInt, (float *)imgSqInt_f, height, width, stream);
 
@@ -1597,7 +1599,8 @@ int main( int argc, char** argv )
 	int irowiterations = (int)ceilf((float)nTileRows/rowStep);
 	int icoliterations = (int)ceilf((float)nTileCols/colStep);
 
-	#pragma acc parallel async(stream) 	
+	#pragma acc parallel async(stream) present(goodcenterX_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], \
+	goodRadius_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found2[0:N_MAX_STAGES]) firstprivate(total_scales)
 	{
 	#pragma acc loop collapse(3) independent 
 	for (int r = 0; r < irowiterations; r++){
@@ -1654,7 +1657,6 @@ int main( int argc, char** argv )
 				int nNodes = cascade->stageClassifier[iStage].count;
 				int foundObj = 0;
 				
-				// if (goodPoints[irow*real_width+icol])
 				if (gp)
 				{
 					float sumClassif = 0.0;
@@ -1680,7 +1682,7 @@ int main( int argc, char** argv )
 					{	
 						if (iStage == nStages - 1)
 						{ 
-							foundObj++;
+							// foundObj++;
 							int actu = 0; 
 
 							float centerX=(((tileWidth-1)*0.5+icol));
@@ -1714,11 +1716,9 @@ int main( int argc, char** argv )
 	}
 	}
 
-
-	// // present(goodcenterX[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY[0:NB_MAX_DETECTION*N_MAX_STAGES], goodRadius[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
-	//  goodcenterX_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], goodRadius_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
-	//  nb_obj_found2[0:N_MAX_STAGES], nb_obj_found[0:N_MAX_STAGES])
-	#pragma acc parallel loop  async(stream)
+	#pragma acc parallel loop  async(stream) present(goodcenterX[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY[0:NB_MAX_DETECTION*N_MAX_STAGES], goodRadius[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
+	 goodcenterX_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], goodRadius_tmp[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
+	 nb_obj_found2[0:N_MAX_STAGES], nb_obj_found[0:N_MAX_STAGES])
 	for (int s = 0; s < total_scales; s++){
 		const float scaleFactor = (float) powf(scaleStep, (float)s);
 		const int tileWidth = (int)floor(detSizeC * scaleFactor + 0.5);
@@ -1759,11 +1759,8 @@ int main( int argc, char** argv )
 	}
 
 
-	// // present(goodcenterX[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
-	// 	//  goodcenterY[0:NB_MAX_DETECTION*N_MAX_STAGES], position[0:width*height], nb_obj_found[0:N_MAX_STAGES]) \ 
-	// 	   //copy(result2[0:real_height][0:real_width]) 
-	
-	#pragma acc parallel async(stream) firstprivate(real_width, real_height)
+	#pragma acc parallel async(stream) firstprivate(real_width, real_height)present(goodcenterX[0:NB_MAX_DETECTION*N_MAX_STAGES], goodcenterY[0:NB_MAX_DETECTION*N_MAX_STAGES], \ 
+		 goodRadius[0:NB_MAX_DETECTION*N_MAX_STAGES], position[0:width*height], nb_obj_found[0:N_MAX_STAGES]) //    copy(result2[0:real_height][0:real_width]) 
 		{
 		int cnt_scale = 0, max_scale = 0, count=0, max_det = 0;
 
@@ -1816,12 +1813,10 @@ int main( int argc, char** argv )
 				}
 			}
 		}	
-		}
-
 		
 		int finalNb = 0;	
 		
-		#pragma acc parallel loop seq async(stream)
+		#pragma acc  loop seq 
 		for(int i=0; i<NB_MAX_POINTS; i+=3)
 		{
 			if (position[i]!=0) 
@@ -1834,49 +1829,49 @@ int main( int argc, char** argv )
 			}
 		}
 
-		// }	//END PARALLEL REGION
-	
-	// 	#if WRITE_IMG
-    //     // Write the final result of the detection application 
-	// 	sprintf(result_name, "result_%d.pgm", image_counter);
-	// 	TRACE_INFO(("%s\n", result_name));
+		}	//END PARALLEL REGION
+
+		#if WRITE_IMG
+        // Write the final result of the detection application 
+		sprintf(result_name, "result_%d.pgm", image_counter);
+		TRACE_INFO(("%s\n", result_name));
     
-	// 	// Draw detection
-	// 	for(i=0; i<NB_MAX_POINTS; i+=3)
-	// 	{
-	// 		if(position[i] != 0 && position[i+1] != 0 && position[i+2] != 0)
-	// 		{
-	// 			raster_rectangle(result2[scale_index_found], (int)position[i], (int)position[i+1], (int)(position[i+2]/2), real_width);
-	// 		}
+		// Draw detection
+		for(i=0; i<NB_MAX_POINTS; i+=3)
+		{
+			if(position[i] != 0 && position[i+1] != 0 && position[i+2] != 0)
+			{
+				raster_rectangle(result2[scale_index_found], (int)position[i], (int)position[i+1], (int)(position[i+2]/2), real_width);
+			}
 			
-	// 	}
+		}
 
-
-	// 	// Re-build the result image with highlighted detections
-    //         for(i=0; i<real_height; i++){
-    //             for(j=0; j<real_width; j++)
-    //             {
-    //                 if(result2[scale_index_found][i*real_width+j]!= 255)
-    //                 {
-    //                     result2[scale_index_found][i*real_width+j] = img[i*real_width+j];
-    //                 }
-    //             }
-    //         }
+		// Re-build the result image with highlighted detections
+            for(i=0; i<real_height; i++){
+                for(j=0; j<real_width; j++)
+                {
+                    if(result2[scale_index_found][i*real_width+j]!= 255)
+                    {
+                        result2[scale_index_found][i*real_width+j] = img[i*real_width+j];
+                    }
+                }
+            }
             
-    //         imgWrite((uint32_t *)result2[scale_index_found], result_name, height, width);
-	// 	#endif
+            imgWrite((uint32_t *)result2[scale_index_found], result_name, height, width);
+		#endif
 
 		// TRACE_INFO(("END\n"));
-
-
-		
 	// Task 3: End Frame post-processing.
-	
-	// end = clock();
-	// detectionTime = (double)(end-start)/CLOCKS_PER_SEC * 1000;
-	// printf("\nTASK 3 : Execution time = %f ms.\n\n", detectionTime);
-	
 	} //for of all images
+	#pragma acc exit data delete(img1[0:width*height], img2[0:width*height], imgSq1[0:width*height], imgSq2[0:width*height], \ 
+	imgInt1[0:width*height], imgInt2[0:width*height], imgSqInt1[0:width*height], imgSqInt2[0:width*height], goodcenterY_tmp1[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	imgInt_f1[0:width*height], imgInt_f2[0:width*height], imgSqInt_f1[0:width*height], imgSqInt_f2[0:width*height], \ 
+	foundObj_test_1[0:N_MAX_STAGES], foundObj_test_2[0:N_MAX_STAGES], foundObj_test2_1[0:N_MAX_STAGES], foundObj_test2_2[0:N_MAX_STAGES], goodcenterX_tmp1[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	goodcenterX_tmp2[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY_tmp2[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found2_1[0:N_MAX_STAGES], \ 
+	nb_obj_found2_2[0:N_MAX_STAGES], goodRadius_tmp1[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius_tmp2[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	nb_obj_found_1[0:N_MAX_STAGES],  nb_obj_found_2[0:N_MAX_STAGES], goodcenterX1[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterX2[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	goodcenterY1[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY2[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius1[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
+	goodRadius2[0:N_MAX_STAGES*NB_MAX_DETECTION], position1[0:width*height], position2[0:width*height]) 
 	} while(InProcessingLoop());
 
 	#pragma acc wait
@@ -1885,29 +1880,8 @@ int main( int argc, char** argv )
 	printf("\nExecution time = %f for %d FRAMES ms.\n", frame_time, (argc-2));
 
 
-	// #pragma acc exit data delete(img[0:width*height], imgSq[0:width*height], imgInt[0:width*height], imgSqInt[0:width*height], \ 
-	// imgInt_f[0:width*height], imgSqInt_f[0:width*height], foundObj_test[0:N_MAX_STAGES], \ 
-	// goodcenterX_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION],  \ 
-	// nb_obj_found2[0:N_MAX_STAGES], goodRadius_tmp[0:N_MAX_STAGES*NB_MAX_DETECTION], nb_obj_found[0:N_MAX_STAGES], \ 
-	// goodcenterX[0:N_MAX_STAGES*NB_MAX_DETECTION], goodcenterY[0:N_MAX_STAGES*NB_MAX_DETECTION], goodRadius[0:N_MAX_STAGES*NB_MAX_DETECTION], \ 
-	// position[0:width*height]) 
-
 	// FREE ALL the allocations 
-	releaseCascade(cascade);
-	releaseCascade(cascade_scaled);
-	// free(feature_scaled);
-	// free(img);
-	// free(imgInt);
-	// free(imgSq);
-	// free(imgSqInt);
-	// free(result2);
-
-	// free(goodcenterX);
-	// free(goodcenterY);
-	// free(goodRadius);
-	// free(nb_obj_found2);
-		// free(imgInt_f);
-	// free(imgSqInt_f);
+	free(cascade);
 
 	return 0;
 }
